@@ -4,6 +4,7 @@ Test script for doctest.
 
 from test import support
 from test.support import import_helper
+from concurrent.futures import ThreadPoolExecutor
 import doctest
 import functools
 import os
@@ -3951,6 +3952,44 @@ def test_syntax_error_with_incorrect_expected_note():
 
     >>> _colorize.COLORIZE = save_colorize
     """
+
+
+class TestDoctestParallelExecution(unittest.TestCase):
+    def _make_module(self, *, id, value):
+        code = f'''
+def example():
+    """
+    >>> sum(i**2 for i in range(10000))
+    333283335000
+    >>> print({value!r})
+    {value}
+    >>> sum(i**3 for i in range(10000))
+    2499500025000000
+    """
+    pass
+'''
+        module = types.ModuleType(f'_test_module_{id}')
+        exec(code, module.__dict__)
+        return module
+
+    def test_parallel_execution(self):
+        modules = [self._make_module(id=i, value=f"output_{i}") for i in range(10)]
+
+        finder = doctest.DocTestFinder()
+        tests = []
+        for module in modules:
+            tests.extend(t for t in finder.find(module) if t.examples)
+
+        def run_one(test):
+            sys.setswitchinterval(0.000001)
+            runner = doctest.DocTestRunner(verbose=False)
+            return runner.run(test)
+
+        sys.setswitchinterval(0.000001)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(run_one, tests))
+
+        self.assertEqual(sum(r.failed for r in results), 0)
 
 
 def load_tests(loader, tests, pattern):

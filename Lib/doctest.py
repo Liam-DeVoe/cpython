@@ -106,6 +106,7 @@ import types
 import unittest
 from io import StringIO, TextIOWrapper, BytesIO
 from collections import namedtuple
+from contextlib import redirect_stdout
 import _colorize  # Used in doctests
 from _colorize import ANSIColors, can_colorize
 
@@ -1568,48 +1569,47 @@ class DocTestRunner:
                 def out(s):
                     s = str(s.encode(encoding, 'backslashreplace'), encoding)
                     save_stdout.write(s)
-        sys.stdout = self._fakeout
 
-        # Patch pdb.set_trace to restore sys.stdout during interactive
-        # debugging (so it's not still redirected to self._fakeout).
-        # Note that the interactive output will go to *our*
-        # save_stdout, even if that's not the real sys.stdout; this
-        # allows us to write test cases for the set_trace behavior.
-        save_trace = sys.gettrace()
-        save_set_trace = pdb.set_trace
-        self.debugger = _OutputRedirectingPdb(save_stdout)
-        self.debugger.reset()
-        pdb.set_trace = self.debugger.set_trace
+        with redirect_stdout(self._fakeout, per_thread=True):
+            # Patch pdb.set_trace to restore sys.stdout during interactive
+            # debugging (so it's not still redirected to self._fakeout).
+            # Note that the interactive output will go to *our*
+            # save_stdout, even if that's not the real sys.stdout; this
+            # allows us to write test cases for the set_trace behavior.
+            save_trace = sys.gettrace()
+            save_set_trace = pdb.set_trace
+            self.debugger = _OutputRedirectingPdb(save_stdout)
+            self.debugger.reset()
+            pdb.set_trace = self.debugger.set_trace
 
-        # Patch linecache.getlines, so we can see the example's source
-        # when we're inside the debugger.
-        self.save_linecache_getlines = linecache.getlines
-        linecache.getlines = self.__patched_linecache_getlines
+            # Patch linecache.getlines, so we can see the example's source
+            # when we're inside the debugger.
+            self.save_linecache_getlines = linecache.getlines
+            linecache.getlines = self.__patched_linecache_getlines
 
-        # Make sure sys.displayhook just prints the value to stdout
-        save_displayhook = sys.displayhook
-        sys.displayhook = sys.__displayhook__
-        saved_can_colorize = _colorize.can_colorize
-        _colorize.can_colorize = lambda *args, **kwargs: False
-        color_variables = {"PYTHON_COLORS": None, "FORCE_COLOR": None}
-        for key in color_variables:
-            color_variables[key] = os.environ.pop(key, None)
-        try:
-            return self.__run(test, compileflags, out)
-        finally:
-            sys.stdout = save_stdout
-            pdb.set_trace = save_set_trace
-            sys.settrace(save_trace)
-            linecache.getlines = self.save_linecache_getlines
-            sys.displayhook = save_displayhook
-            _colorize.can_colorize = saved_can_colorize
-            for key, value in color_variables.items():
-                if value is not None:
-                    os.environ[key] = value
-            if clear_globs:
-                test.globs.clear()
-                import builtins
-                builtins._ = None
+            # Make sure sys.displayhook just prints the value to stdout
+            save_displayhook = sys.displayhook
+            sys.displayhook = sys.__displayhook__
+            saved_can_colorize = _colorize.can_colorize
+            _colorize.can_colorize = lambda *args, **kwargs: False
+            color_variables = {"PYTHON_COLORS": None, "FORCE_COLOR": None}
+            for key in color_variables:
+                color_variables[key] = os.environ.pop(key, None)
+            try:
+                return self.__run(test, compileflags, out)
+            finally:
+                pdb.set_trace = save_set_trace
+                sys.settrace(save_trace)
+                linecache.getlines = self.save_linecache_getlines
+                sys.displayhook = save_displayhook
+                _colorize.can_colorize = saved_can_colorize
+                for key, value in color_variables.items():
+                    if value is not None:
+                        os.environ[key] = value
+                if clear_globs:
+                    test.globs.clear()
+                    import builtins
+                    builtins._ = None
 
     #/////////////////////////////////////////////////////////////////
     # Summarization
